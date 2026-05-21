@@ -1,0 +1,21 @@
+services:
+  app:
+    image: ${DOCKER_IMAGE:-wa-bot-be}:${DOCKER_TAG:-latest}
+    container_name: wa-bot-be
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - PORT=3000
+      - DATABASE_URL=${DATABASE_URL}
+      - BAILEYS_AUTH_DIR=/app/data/baileys-auth
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - OPENAI_SYSTEM_PROMPT=${OPENAI_SYSTEM_PROMPT:-}
+      - AI_CONVERSATION_HISTORY_LIMIT=${AI_CONVERSATION_HISTORY_LIMIT:-10}
+      - DEFAULT_AUTO_REPLY_MESSAGE=${DEFAULT_AUTO_REPLY_MESSAGE:-Halo! Pesan Anda sudah kami terima.}
+    volumes:
+      - baileys-auth:/app/data/baileys-auth
+
+volumes:
+  baileys-auth:
