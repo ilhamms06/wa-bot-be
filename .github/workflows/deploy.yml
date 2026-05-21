@@ -12,6 +12,7 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment: WA_BE_PROD
     permissions:
       contents: read
       packages: write
