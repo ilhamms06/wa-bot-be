@@ -4,6 +4,20 @@ import OpenAI from 'openai';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { BotConfigService } from '../config/config.service';
 import { MessagesService } from '../messages/messages.service';
+import { AnalyzeGroupDto } from './dto/analyze-group.dto';
+
+export interface GroupAnalysis {
+  period: string;
+  since: Date;
+  until: Date;
+  groupJid: string | null;
+  sender: string | null;
+  messageCount: number;
+  analysis: string;
+}
+
+// Analysis answers benefit from more room than a short chat reply.
+const ANALYSIS_MAX_TOKENS = 1500;
 
 @Injectable()
 export class AiService {
@@ -87,6 +101,89 @@ export class AiService {
     this.logger.log(`AI reply for ${phoneNumber}: "${reply.substring(0, 80)}"`);
 
     return reply;
+  }
+
+  /**
+   * Fetches group messages for the given time window and asks the AI to
+   * analyze activity / habits. If `sender` is set, the analysis focuses on
+   * that single person (e.g. "analyze my habits in this group").
+   */
+  async analyzeGroupActivity(dto: AnalyzeGroupDto): Promise<GroupAnalysis> {
+    const result = await this.messagesService.findGroupMessages(dto);
+
+    if (result.count === 0) {
+      return {
+        period: result.period,
+        since: result.since,
+        until: result.until,
+        groupJid: result.groupJid,
+        sender: result.sender,
+        messageCount: 0,
+        analysis:
+          'Tidak ada pesan grup pada periode ini, jadi belum bisa dianalisa.',
+      };
+    }
+
+    const model = await this.botConfigService.get('ai_model');
+
+    const transcript = result.data
+      .map((msg) => {
+        const t = msg.receivedAt ?? msg.createdAt;
+        const stamp = t.toISOString().slice(0, 16).replace('T', ' ');
+        return `[${stamp}] ${msg.sender ?? 'unknown'}: ${msg.body ?? ''}`;
+      })
+      .join('\n');
+
+    const focus = result.sender
+      ? `Fokuskan analisa pada pesan dari pengirim dengan nomor ${result.sender}.`
+      : 'Analisa aktivitas grup secara keseluruhan beserta para pesertanya.';
+
+    const systemPrompt = [
+      'Kamu adalah analis percakapan. Kamu diberikan transkrip pesan dari sebuah grup WhatsApp,',
+      'di mana setiap baris berformat "[waktu] pengirim: isi pesan".',
+      focus,
+      'Berikan analisa dalam Bahasa Indonesia yang ringkas dan terstruktur dalam poin-poin, mencakup:',
+      '- Jam/waktu paling aktif',
+      '- Topik yang paling sering dibahas',
+      '- Gaya bahasa & nada komunikasi',
+      '- Frekuensi dan pola keaktifan',
+      '- Insight atau kebiasaan menarik lainnya',
+    ].join('\n');
+
+    const userContent = dto.question
+      ? `${dto.question}\n\nBerikut transkripnya:\n\n${transcript}`
+      : `Berikut transkrip percakapan grup:\n\n${transcript}`;
+
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userContent },
+    ];
+
+    this.logger.debug(
+      `Analyzing ${result.count} group messages (period: ${result.period}, model: ${model})`,
+    );
+
+    const completion = await this.openai.chat.completions.create({
+      model,
+      messages,
+      max_tokens: ANALYSIS_MAX_TOKENS,
+    });
+
+    const analysis = completion.choices[0]?.message?.content?.trim();
+
+    if (!analysis) {
+      throw new Error('OpenAI returned an empty analysis');
+    }
+
+    return {
+      period: result.period,
+      since: result.since,
+      until: result.until,
+      groupJid: result.groupJid,
+      sender: result.sender,
+      messageCount: result.count,
+      analysis,
+    };
   }
 
   async testPrompt(

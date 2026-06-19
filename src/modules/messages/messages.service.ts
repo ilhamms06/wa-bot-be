@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
+import {
+  MessagePeriod,
+  QueryGroupMessagesDto,
+} from './dto/query-group-messages.dto';
 import { QueryMessagesDto } from './dto/query-messages.dto';
 import { Message } from './entities/message.entity';
 
@@ -23,6 +27,22 @@ export interface PaginatedMessages {
   limit: number;
   totalPages: number;
 }
+
+export interface GroupMessages {
+  period: MessagePeriod;
+  since: Date;
+  until: Date;
+  groupJid: string | null;
+  sender: string | null;
+  count: number;
+  data: Message[];
+}
+
+const PERIOD_DAYS: Record<MessagePeriod, number> = {
+  [MessagePeriod.Day]: 1,
+  [MessagePeriod.Week]: 7,
+  [MessagePeriod.Month]: 30,
+};
 
 @Injectable()
 export class MessagesService {
@@ -64,6 +84,52 @@ export class MessagesService {
       page,
       limit,
       totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Fetch group messages within a time window (day/week/month), optionally
+   * scoped to a single group and/or a single sender. Returned oldest-first so
+   * the output reads as a chronological transcript — ready to feed to the AI.
+   */
+  async findGroupMessages(query: QueryGroupMessagesDto): Promise<GroupMessages> {
+    const period = query.period ?? MessagePeriod.Week;
+    const limit = query.limit ?? 500;
+
+    const until = new Date();
+    const since = new Date(
+      until.getTime() - PERIOD_DAYS[period] * 24 * 60 * 60 * 1000,
+    );
+
+    const qb = this.messagesRepository
+      .createQueryBuilder('message')
+      .where('message.isGroup = :isGroup', { isGroup: true })
+      // Use the original message time when available, else the row insert time
+      .andWhere('COALESCE(message.receivedAt, message.createdAt) >= :since', {
+        since,
+      });
+
+    if (query.groupJid) {
+      qb.andWhere('message.from = :groupJid', { groupJid: query.groupJid });
+    }
+
+    if (query.sender) {
+      qb.andWhere('message.sender = :sender', { sender: query.sender });
+    }
+
+    const data = await qb
+      .orderBy('COALESCE(message.receivedAt, message.createdAt)', 'ASC')
+      .take(limit)
+      .getMany();
+
+    return {
+      period,
+      since,
+      until,
+      groupJid: query.groupJid ?? null,
+      sender: query.sender ?? null,
+      count: data.length,
+      data,
     };
   }
 

@@ -6,6 +6,7 @@ import {
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
+import { QueryGroupMessagesDto } from './dto/query-group-messages.dto';
 import { QueryMessagesDto } from './dto/query-messages.dto';
 import { MessagesService } from './messages.service';
 
@@ -31,6 +32,22 @@ export class MessagesController {
   })
   findAll(@Query() query: QueryMessagesDto) {
     return this.messagesService.findAll(query);
+  }
+
+  @Get('groups')
+  @ApiOperation({
+    summary: 'Get group messages within a time window',
+    description:
+      'Returns group messages from the last day/week/month, oldest-first. ' +
+      'Optionally scoped to a single group (groupJid) and/or sender. ' +
+      'Intended as input for AI analysis of group activity.',
+  })
+  @ApiQuery({ name: 'period', required: false, enum: ['day', 'week', 'month'] })
+  @ApiQuery({ name: 'groupJid', required: false, type: String })
+  @ApiQuery({ name: 'sender', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  findGroupMessages(@Query() query: QueryGroupMessagesDto) {
+    return this.messagesService.findGroupMessages(query);
   }
 
   @Get(':id')
