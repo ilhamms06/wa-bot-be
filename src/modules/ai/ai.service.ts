@@ -186,6 +186,89 @@ export class AiService {
     };
   }
 
+  /**
+   * Personal assistant reply. Uses the dedicated `assistant_system_prompt`
+   * persona, kept separate from the customer-service `system_prompt`.
+   * Stateless by design — a command is answered on its own, not as part of
+   * the chat's customer conversation history.
+   */
+  async generateAssistantReply(question: string): Promise<string> {
+    const [systemPrompt, model, maxTokens] = await Promise.all([
+      this.botConfigService.get('assistant_system_prompt'),
+      this.botConfigService.get('ai_model'),
+      this.botConfigService.getNumber('ai_max_tokens'),
+    ]);
+
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: question },
+    ];
+
+    this.logger.debug(`Assistant calling OpenAI (model: ${model})`);
+
+    const completion = await this.openai.chat.completions.create({
+      model,
+      messages,
+      max_tokens: maxTokens > 0 ? maxTokens : undefined,
+    });
+
+    const reply = completion.choices[0]?.message?.content?.trim();
+
+    if (!reply) {
+      throw new Error('OpenAI returned an empty response');
+    }
+
+    return reply;
+  }
+
+  /**
+   * Reads a food photo and returns an estimated nutrition breakdown.
+   * Requires a vision-capable model (the default `gpt-4o-mini` supports it).
+   */
+  async analyzeFoodNutrition(
+    image: Buffer,
+    mimetype: string,
+    note?: string,
+  ): Promise<string> {
+    const [systemPrompt, model] = await Promise.all([
+      this.botConfigService.get('bot_nutrition_prompt'),
+      this.botConfigService.get('ai_model'),
+    ]);
+
+    const dataUrl = `data:${mimetype};base64,${image.toString('base64')}`;
+    const userText =
+      note && note.length > 0
+        ? note
+        : 'Analisa nutrisi makanan pada foto ini.';
+
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: userText },
+          { type: 'image_url', image_url: { url: dataUrl } },
+        ],
+      },
+    ];
+
+    this.logger.debug(`Analyzing food nutrition image (model: ${model})`);
+
+    const completion = await this.openai.chat.completions.create({
+      model,
+      messages,
+      max_tokens: ANALYSIS_MAX_TOKENS,
+    });
+
+    const result = completion.choices[0]?.message?.content?.trim();
+
+    if (!result) {
+      throw new Error('OpenAI returned an empty nutrition analysis');
+    }
+
+    return result;
+  }
+
   async testPrompt(
     message: string,
     systemPromptOverride?: string,

@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AiService } from '../ai/ai.service';
+import { AssistantService } from '../assistant/assistant.service';
+import { BotService } from '../bot/bot.service';
 import { MessagesService } from '../messages/messages.service';
 import { RulesService } from '../rules/rules.service';
 import { WhitelistService } from '../whitelist/whitelist.service';
@@ -18,6 +20,8 @@ export class WhatsappService implements OnModuleInit {
     private readonly messagesService: MessagesService,
     private readonly aiService: AiService,
     private readonly rulesService: RulesService,
+    private readonly assistantService: AssistantService,
+    private readonly botService: BotService,
     private readonly configService: ConfigService,
   ) {
     this.defaultReplyMessage =
@@ -32,18 +36,86 @@ export class WhatsappService implements OnModuleInit {
   }
 
   private async handleMessage(incoming: IncomingMessage): Promise<void> {
+    // Personal assistant: a prefixed command you send yourself, in any chat.
+    // Checked first so it works in groups too and never falls into the
+    // owner-cooldown / auto-reply paths below.
+    const command = await this.assistantService.matchCommand(incoming);
+    if (command !== null) {
+      await this.handleAssistantCommand(incoming, command);
+      return;
+    }
+
+    // BOT module: a /task command sent TO the bot number (e.g. food photo).
+    if (await this.botService.matchesCommand(incoming)) {
+      await this.handleBotCommand(incoming);
+      return;
+    }
+
     if (incoming.isGroup) {
       await this.handleGroupMessage(incoming);
       return;
     }
 
-    // Owner sent a message manually — track it for cooldown
+    // Owner sent a message manually (no assistant prefix) — track it for
+    // cooldown and stop here. This also absorbs the bot's own outgoing
+    // replies (which are fromMe), preventing an auto-reply echo loop.
     if (incoming.fromMe) {
       await this.handleOwnerMessage(incoming);
       return;
     }
 
     await this.handleIncomingMessage(incoming);
+  }
+
+  private async handleAssistantCommand(
+    incoming: IncomingMessage,
+    command: string,
+  ): Promise<void> {
+    try {
+      const reply = await this.assistantService.handle(command);
+      await this.baileysService.sendText(incoming.from, `🤖 ${reply}`, {
+        quoted: incoming.raw,
+      });
+      this.logger.log(`Assistant replied in ${incoming.from}`);
+    } catch (err) {
+      this.logger.error(
+        `Assistant failed for ${incoming.from}`,
+        err instanceof Error ? err.message : String(err),
+      );
+      try {
+        await this.baileysService.sendText(
+          incoming.from,
+          '🤖 Maaf, asisten sedang error. Coba lagi sebentar lagi ya.',
+          { quoted: incoming.raw },
+        );
+      } catch {
+        // sending the error notice itself failed — already logged above
+      }
+    }
+  }
+
+  private async handleBotCommand(incoming: IncomingMessage): Promise<void> {
+    try {
+      const reply = await this.botService.handleCommand(incoming);
+      await this.baileysService.sendText(incoming.from, reply, {
+        quoted: incoming.raw,
+      });
+      this.logger.log(`Bot command handled for ${incoming.from}`);
+    } catch (err) {
+      this.logger.error(
+        `Bot command failed for ${incoming.from}`,
+        err instanceof Error ? err.message : String(err),
+      );
+      try {
+        await this.baileysService.sendText(
+          incoming.from,
+          'Maaf, bot gagal memproses permintaanmu. Coba lagi sebentar lagi ya.',
+          { quoted: incoming.raw },
+        );
+      } catch {
+        // sending the error notice itself failed — already logged above
+      }
+    }
   }
 
   private async handleGroupMessage(incoming: IncomingMessage): Promise<void> {

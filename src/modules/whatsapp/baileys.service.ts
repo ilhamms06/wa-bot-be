@@ -7,9 +7,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import makeWASocket, {
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   isJidGroup,
   useMultiFileAuthState,
+  WAMessage,
   WASocket,
 } from '@whiskeysockets/baileys';
 import * as fs from 'fs';
@@ -67,13 +69,45 @@ export class BaileysService implements OnModuleInit, OnModuleDestroy {
     return this.qrCode;
   }
 
-  async sendText(to: string, text: string): Promise<void> {
+  async sendText(
+    to: string,
+    text: string,
+    options?: { quoted?: WAMessage },
+  ): Promise<void> {
     if (!this.socket || this.connectionStatus !== 'open') {
       throw new Error('WhatsApp is not connected');
     }
     const jid = to.includes('@') ? to : `${to}@s.whatsapp.net`;
-    await this.socket.sendMessage(jid, { text });
+    await this.socket.sendMessage(jid, { text }, { quoted: options?.quoted });
     this.logger.log(`Message sent to ${to}`);
+  }
+
+  /**
+   * Downloads the image of a message as a Buffer. Throws if the message has no
+   * image or the connection is down.
+   */
+  async downloadImage(
+    message: WAMessage,
+  ): Promise<{ buffer: Buffer; mimetype: string }> {
+    if (!this.socket || this.connectionStatus !== 'open') {
+      throw new Error('WhatsApp is not connected');
+    }
+    if (!message.message?.imageMessage) {
+      throw new Error('Message does not contain an image');
+    }
+
+    const buffer = (await downloadMediaMessage(
+      message,
+      'buffer',
+      {},
+      {
+        logger: pino({ level: 'silent' }),
+        reuploadRequest: this.socket.updateMediaMessage,
+      },
+    )) as Buffer;
+
+    const mimetype = message.message.imageMessage.mimetype ?? 'image/jpeg';
+    return { buffer, mimetype };
   }
 
   async getGroups(): Promise<
@@ -227,6 +261,7 @@ export class BaileysService implements OnModuleInit, OnModuleDestroy {
           const body =
             msg.message?.conversation ??
             msg.message?.extendedTextMessage?.text ??
+            msg.message?.imageMessage?.caption ??
             '';
 
           const incoming: IncomingMessage = {
@@ -240,6 +275,7 @@ export class BaileysService implements OnModuleInit, OnModuleDestroy {
             fromMe: isFromMe,
             isGroup,
             sender,
+            raw: msg,
           };
 
           this.logger.log(

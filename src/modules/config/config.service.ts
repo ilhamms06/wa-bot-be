@@ -42,6 +42,21 @@ export class BotConfigService implements OnModuleInit {
       ai_offer_text:
         'Halo! Saya bisa bantu jawab pertanyaan kamu pakai AI. Ketik "ya" kalau mau lanjut.',
       ai_accept_text: 'ya',
+      assistant_enabled: 'true',
+      assistant_prefix: '.ai',
+      assistant_system_prompt:
+        'Kamu adalah asisten pribadi yang cerdas, ringkas, dan to the point. ' +
+        'Jawab dalam Bahasa Indonesia yang jelas kecuali diminta lain. ' +
+        'Kalau diberi perintah, lakukan sebaik mungkin.',
+      bot_enabled: 'true',
+      bot_command_prefix: '/task',
+      bot_nutrition_prompt:
+        'Kamu adalah ahli gizi. Dari foto makanan yang diberikan, identifikasi ' +
+        'makanannya lalu berikan estimasi nutrisi dalam Bahasa Indonesia secara ' +
+        'ringkas dan terstruktur (pakai poin): nama makanan, perkiraan porsi, ' +
+        'kalori (kkal), protein, karbohidrat, lemak, dan serat bila relevan. ' +
+        'Tambahkan 1-2 tips singkat. Tegaskan bahwa semua angka adalah estimasi. ' +
+        'Jika foto bukan makanan, sampaikan dengan sopan.',
     };
   }
 

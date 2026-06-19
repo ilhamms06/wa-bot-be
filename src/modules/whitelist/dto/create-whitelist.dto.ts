@@ -45,4 +45,14 @@ export class CreateWhitelistDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Pre-accept AI for this number, skipping the "ketik ya" offer flow. ' +
+      'Useful for your own number / trusted contacts.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  aiAccepted?: boolean;
 }
